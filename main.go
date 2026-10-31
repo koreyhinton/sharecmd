@@ -128,6 +128,8 @@ func (s *Server) handleMatch(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
+	// Lets a browser client served from another port (like demo/web) read the reply.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(resp)
 }
 

@@ -2,6 +2,8 @@
 
 A deterministic lockstep relay for a 2-player RTS game, plus a demo client.
 
+For a playable demo game (Rust + macroquad, desktop and browser), see [demo/README.md](demo/README.md).
+
 ## Run it
 
 Open three terminals in this folder.
