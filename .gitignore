@@ -1,0 +1,9 @@
+
+# Emacs autosave files
+\#*\#
+.\#*
+*~
+
+
+# Logs
+*.log
