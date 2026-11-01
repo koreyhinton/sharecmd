@@ -1,3 +1,7 @@
+#!/bin/bash
+v=${1-=mn_}
+# maps
+cat << EOF
 // Deterministic lockstep relay for a 2-player RTS.
 //
 // Server: go run . -mode server -addr :8080
@@ -425,3 +429,4 @@ func main() {
 		log.Fatalf("unknown mode %q", *mode)
 	}
 }
+EOF
