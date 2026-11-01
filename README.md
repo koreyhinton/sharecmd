@@ -11,19 +11,19 @@ Open three terminals in this folder.
 **Terminal 1: server**
 
 ```sh
-go run main.go -mode server -addr :8080
+go run main.go models.go -mode server -addr :8080
 ```
 
 **Terminal 2: player 0**
 
 ```sh
-go run main.go -mode client -server http://localhost:8080
+go run main.go models.go -mode client -server http://localhost:8080
 ```
 
 **Terminal 3: player 1**
 
 ```sh
-go run main.go -mode client -server http://localhost:8080
+go run main.go models.go -mode client -server http://localhost:8080
 ```
 
 The first client to connect becomes player 0 and the second becomes player 1. When both are connected, the match starts. Type a command in either client and press Enter. Both clients will print it on the same turn.
@@ -59,7 +59,7 @@ Type only the command, not JSON. The client adds the JSON wrapper itself. Over t
 Example with a shorter join timeout:
 
 ```sh
-go run main.go -mode server -addr :8080 -join-timeout 10s
+go run main.go models.go -mode server -addr :8080 -join-timeout 10s
 ```
 
 ## Client options
@@ -74,5 +74,5 @@ go run main.go -mode server -addr :8080 -join-timeout 10s
 Example with a longer delay for a slow connection:
 
 ```sh
-go run main.go -mode client -server http://localhost:8080 -delay 4
+go run main.go models.go -mode client -server http://localhost:8080 -delay 4
 ```
