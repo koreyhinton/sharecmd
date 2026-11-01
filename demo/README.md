@@ -6,11 +6,14 @@ Rust 1.90 is pinned in `rust-toolchain.toml`. rustup installs it, plus the wasm 
 
 ## Start the server
 
-From the parent folder:
+From the parent folder, generate `main.go` and start the server:
 
 ```sh
-go run main.go -mode server -addr :8080
+./build.sh
+go run main.go models.go -mode server -addr :8080
 ```
+
+`build.sh` needs the `orc` repo checked out next to this one. See [Build it](../README.md#build-it) in the main README.
 
 ## Desktop
 
@@ -22,12 +25,16 @@ cargo run -- --server http://localhost:8080
 
 ## Browser
 
+The Go server from [Start the server](#start-the-server) must be running too. The commands below only build and serve the page. The page then connects to the Go server on port 8080.
+
+Build once and start one web server. Both players use the same page:
+
 ```sh
 ./build-web.sh
 python3 -m http.server 8000 -d web
 ```
 
-Open http://localhost:8000 in two browser tabs.
+Open http://localhost:8000 in two browser tabs, one per player. Run `./build-web.sh` again only when you change the Rust code.
 
 The page connects to port 8080 on the same host by default. Settings can go in the page URL, for example `http://localhost:8000/?server=http://192.168.1.20:8080&delay=3`.
 
