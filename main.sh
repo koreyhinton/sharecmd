@@ -1,6 +1,11 @@
 #!/bin/bash
-v=${1-=mn_}
+v=${1:-mn_}
 # maps
+export ${v}hdl_ws_R=r
+export ${v}hdl_ws_W=w
+export ${v}hdl_mtch_R=r
+export ${v}hdl_mtch_W=w
+
 cat << EOF
 // Deterministic lockstep relay for a 2-player RTS.
 //
@@ -47,97 +52,6 @@ func (s *Server) remove(m *Match) {
 }
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-
-func (s *Server) handleMatch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	s.mu.Lock()
-	var resp MatchResp
-	if s.waiting != nil {
-		m := s.waiting
-		s.waiting = nil
-		m.joined = 2
-		resp = MatchResp{MatchID: m.id, Player: 1}
-	} else {
-		s.nextID++
-		m := &Match{
-			id:      fmt.Sprintf("m%d", s.nextID),
-			seed:    rand.Int63(),
-			joined:  1,
-			pending: map[int]*[2][]json.RawMessage{},
-			got:     map[int]*[2]bool{},
-		}
-		s.matches[m.id] = m
-		s.waiting = m
-		resp = MatchResp{MatchID: m.id, Player: 0}
-
-		// If both players haven't opened their websocket in time, end the match so
-		// nobody waits forever on a player who called /match and then went away.
-		time.AfterFunc(s.joinTimeout, func() {
-			m.mu.Lock()
-			if m.ended || (m.conns[0] != nil && m.conns[1] != nil) {
-				m.mu.Unlock()
-				return
-			}
-			m.ended = true // set under the lock so a late connect is rejected
-			m.mu.Unlock()
-			m.notifyEnd("opponent didn't connect in time")
-			s.remove(m)
-		})
-	}
-	s.mu.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	// Lets a browser client served from another port (like demo/web) read the reply.
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("match")
-	var player int
-	if _, err := fmt.Sscan(r.URL.Query().Get("player"), &player); err != nil || player < 0 || player > 1 {
-		http.Error(w, "bad player", http.StatusBadRequest)
-		return
-	}
-	s.mu.Lock()
-	m := s.matches[id]
-	s.mu.Unlock()
-	if m == nil {
-		http.Error(w, "no such match", http.StatusNotFound)
-		return
-	}
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("upgrade:", err)
-		return
-	}
-
-	m.mu.Lock()
-	if m.conns[player] != nil || m.ended {
-		m.mu.Unlock()
-		conn.WriteJSON(Msg{Type: "end", Reason: "slot taken or match over"})
-		conn.Close()
-		return
-	}
-	m.conns[player] = conn
-	ready := m.conns[0] != nil && m.conns[1] != nil
-	m.mu.Unlock()
-
-	log.Printf("[%s] player %d connected", m.id, player)
-	if ready {
-		for p := 0; p < 2; p++ {
-			m.send(p, Msg{Type: "start", Player: p, Seed: m.seed})
-		}
-		log.Printf("[%s] started, seed=%d", m.id, m.seed)
-	}
-
-	m.end(m.readLoop(player, conn, s.maxAhead))
-	s.remove(m)
-}
 
 func (m *Match) send(p int, msg Msg) {
 	m.mu.Lock()
@@ -231,14 +145,6 @@ func (m *Match) notifyEnd(reason string) {
 		}
 		m.mu.Unlock()
 	}
-}
-
-func runServer(addr string, joinTimeout time.Duration, maxAhead int) {
-	s := &Server{matches: map[string]*Match{}, joinTimeout: joinTimeout, maxAhead: maxAhead}
-	http.HandleFunc("/match", s.handleMatch)
-	http.HandleFunc("/ws", s.handleWS)
-	log.Println("lockstep server listening on", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
 // ---------- Client (test/demo) ----------
@@ -419,7 +325,18 @@ func main() {
 
 	switch *mode {
 	case "server":
-		runServer(*addr, *joinTimeout, *maxAhead)
+		// run server
+		s := &Server{matches: map[string]*Match{}, joinTimeout: *joinTimeout, maxAhead: *maxAhead}
+		handleMatch := func(w http.ResponseWriter, r *http.Request) {
+			` ./main-handle-match.sh ${v}hdl_mtch_ `
+		}
+		handleWS := func(w http.ResponseWriter, r *http.Request) {
+			` ./main-handle-ws.sh ${v}hdl_ws_ `
+		}
+		http.HandleFunc("/match", handleMatch)
+		http.HandleFunc("/ws", handleWS)
+		log.Println("lockstep server listening on", *addr)
+		log.Fatal(http.ListenAndServe(*addr, nil))
 	case "client":
 		if *ticksPerTurn < 1 || *delay < 1 {
 			log.Fatal("ticks-per-turn and delay must be >= 1")
