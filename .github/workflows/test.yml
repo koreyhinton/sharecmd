@@ -1,0 +1,45 @@
+name: test
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # build.sh reads ../orc, so check out both repos side by side.
+      - uses: actions/checkout@v4
+        with:
+          path: sharecmd
+      - uses: actions/checkout@v4
+        with:
+          repository: koreyhinton/orc
+          path: orc
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sharecmd/go.mod
+          cache-dependency-path: sharecmd/go.sum
+
+      - name: Generate main.go
+        working-directory: sharecmd
+        run: ./build.sh
+
+      - name: Check gofmt
+        working-directory: sharecmd
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        working-directory: sharecmd
+        run: go vet ./...
+
+      - name: Test
+        working-directory: sharecmd
+        run: go test -race -v ./...
