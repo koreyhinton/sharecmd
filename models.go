@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
 
@@ -29,6 +30,9 @@ type MatchResp struct {
 
 // ---------- Server ----------
 
+// upgrader turns /ws requests into websocket connections. It accepts any origin.
+var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+
 type Match struct {
 	id   string
 	seed int64
@@ -36,7 +40,6 @@ type Match struct {
 	mu       sync.Mutex
 	conns    [2]*websocket.Conn
 	writeMu  [2]sync.Mutex // gorilla allows only one writer per conn at a time
-	joined   int
 	nextTurn int
 	pending  map[int]*[2][]json.RawMessage
 	got      map[int]*[2]bool

@@ -3,8 +3,10 @@ v=${1:-mn_}
 # maps
 export ${v}hdl_ws_R=r
 export ${v}hdl_ws_W=w
+export ${v}hdl_ws_S=s
 export ${v}hdl_mtch_R=r
 export ${v}hdl_mtch_W=w
+export ${v}hdl_mtch_S=s
 
 cat << EOF
 // Deterministic lockstep relay for a 2-player RTS.
@@ -38,114 +40,6 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/gorilla/websocket"
 )
-
-// ---------- Server ----------
-
-// remove drops a finished match. Safe to call more than once.
-func (s *Server) remove(m *Match) {
-	s.mu.Lock()
-	delete(s.matches, m.id)
-	if s.waiting == m {
-		s.waiting = nil
-	}
-	s.mu.Unlock()
-}
-
-var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-
-func (m *Match) send(p int, msg Msg) {
-	m.mu.Lock()
-	c := m.conns[p]
-	over := m.ended && msg.Type != "end"
-	m.mu.Unlock()
-	if c == nil || over {
-		return // no one to send to, or the match is over and only "end" still goes out
-	}
-	m.writeMu[p].Lock()
-	defer m.writeMu[p].Unlock()
-	c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if err := c.WriteJSON(msg); err != nil {
-		log.Printf("[%s] write to p%d: %v", m.id, p, err)
-	}
-}
-
-// readLoop handles one player's messages until they disconnect or break the
-// rules, and returns the reason the match should end.
-func (m *Match) readLoop(player int, conn *websocket.Conn, maxAhead int) string {
-	for {
-		var msg Msg
-		if err := conn.ReadJSON(&msg); err != nil {
-			return fmt.Sprintf("player %d disconnected", player)
-		}
-		if msg.Type != "cmds" {
-			continue
-		}
-
-		m.mu.Lock()
-		if msg.Turn < m.nextTurn {
-			m.mu.Unlock()
-			continue // old turn, ignore
-		}
-		// A normal client is never more than its input delay ahead. Anything far
-		// past that is a bug or abuse, and storing it would let memory grow without limit.
-		if msg.Turn > m.nextTurn+maxAhead {
-			now := m.nextTurn
-			m.mu.Unlock()
-			return fmt.Sprintf("player %d sent turn %d, more than %d turns ahead of turn %d",
-				player, msg.Turn, maxAhead, now)
-		}
-		if m.got[msg.Turn] == nil {
-			m.got[msg.Turn] = &[2]bool{}
-			m.pending[msg.Turn] = &[2][]json.RawMessage{}
-		}
-		if m.got[msg.Turn][player] {
-			m.mu.Unlock()
-			continue // already submitted this turn
-		}
-		m.got[msg.Turn][player] = true
-		m.pending[msg.Turn][player] = msg.Cmds
-
-		// Release every turn that both players have now submitted, in order.
-		var out []Msg
-		for g := m.got[m.nextTurn]; g != nil && g[0] && g[1]; g = m.got[m.nextTurn] {
-			t := m.nextTurn
-			out = append(out, Msg{Type: "turn", Turn: t, All: *m.pending[t]})
-			delete(m.got, t)
-			delete(m.pending, t)
-			m.nextTurn++
-		}
-		m.mu.Unlock()
-
-		for _, o := range out {
-			m.send(0, o)
-			m.send(1, o)
-		}
-	}
-}
-
-func (m *Match) end(reason string) {
-	m.mu.Lock()
-	if m.ended {
-		m.mu.Unlock()
-		return
-	}
-	m.ended = true
-	m.mu.Unlock()
-	m.notifyEnd(reason)
-}
-
-// notifyEnd tells both players the match is over and closes their connections.
-func (m *Match) notifyEnd(reason string) {
-	log.Printf("[%s] ended: %s", m.id, reason)
-	for p := 0; p < 2; p++ {
-		m.send(p, Msg{Type: "end", Reason: reason})
-		m.mu.Lock()
-		if m.conns[p] != nil {
-			m.conns[p].Close()
-		}
-		m.mu.Unlock()
-	}
-}
 
 // ---------- Client (test/demo) ----------
 

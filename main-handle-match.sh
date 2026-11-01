@@ -1,51 +1,49 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} R W
+. ${NSMAP}/bind ${v} R W S
+export ${v}xp_M=m
+export ${v}xp_S=${!s}
 
 cat << EOF
-	if ${!r}.Method != http.MethodPost {
+	isPost := ${!r}.Method == http.MethodPost
+	if !isPost {
 		http.Error(${!w}, "POST only", http.StatusMethodNotAllowed)
-		return
 	}
-	s.mu.Lock()
+
+	// expire ends a new match if both players haven't opened their websocket in time,
+	// so nobody waits forever on a player who called /match and then went away.
+	expire := func(m *Match) {
+		` ./main-handle-match-expire.sh ${v}xp_ `
+	}
+
+	${!s}.mu.Lock()
+	m := ${!s}.waiting
+	hasWaiting := m != nil
 	var resp MatchResp
-	if s.waiting != nil {
-		m := s.waiting
-		s.waiting = nil
-		m.joined = 2
+	if isPost && hasWaiting {
+		${!s}.waiting = nil
 		resp = MatchResp{MatchID: m.id, Player: 1}
-	} else {
-		s.nextID++
-		m := &Match{
-			id:      fmt.Sprintf("m%d", s.nextID),
+	}
+	if isPost && !hasWaiting {
+		${!s}.nextID++
+		m = &Match{
+			id:      fmt.Sprintf("m%d", ${!s}.nextID),
 			seed:    rand.Int63(),
-			joined:  1,
 			pending: map[int]*[2][]json.RawMessage{},
 			got:     map[int]*[2]bool{},
 		}
-		s.matches[m.id] = m
-		s.waiting = m
+		${!s}.matches[m.id] = m
+		${!s}.waiting = m
 		resp = MatchResp{MatchID: m.id, Player: 0}
-
-		// If both players haven't opened their websocket in time, end the match so
-		// nobody waits forever on a player who called /match and then went away.
-		time.AfterFunc(s.joinTimeout, func() {
-			m.mu.Lock()
-			if m.ended || (m.conns[0] != nil && m.conns[1] != nil) {
-				m.mu.Unlock()
-				return
-			}
-			m.ended = true // set under the lock so a late connect is rejected
-			m.mu.Unlock()
-			m.notifyEnd("opponent didn't connect in time")
-			s.remove(m)
-		})
+		time.AfterFunc(${!s}.joinTimeout, func() { expire(m) })
 	}
-	s.mu.Unlock()
+	${!s}.mu.Unlock()
 
-	${!w}.Header().Set("Content-Type", "application/json")
-	// Lets a browser client served from another port (like demo/web) read the reply.
-	${!w}.Header().Set("Access-Control-Allow-Origin", "*")
-	json.NewEncoder(${!w}).Encode(resp)
+	if isPost {
+		${!w}.Header().Set("Content-Type", "application/json")
+		// Lets a browser client served from another port (like demo/web) read the reply.
+		${!w}.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(${!w}).Encode(resp)
+	}
 EOF
