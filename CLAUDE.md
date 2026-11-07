@@ -5,46 +5,50 @@
 `main.go` is generated. Never edit it by hand: change `main.sh` and its subscripts, then run `./build.sh`.
 
 - `build.sh` runs `./main.sh | gofmt > ./main.go` with `pipefail` set.
-- It needs the `orc` repo checked out next to this one (`../orc/lib/src/main/bash/com/koreyhinton/nsmap`). `bind` comes from there.
+- It needs the `orc` repo checked out next to this one. `bind` comes from `../orc/lib/src/main/bash/com/koreyhinton/nsmap` (`NSMAP`), and the websocket snippets from `../orc/lib/src/templates/go/com/koreyhinton/ws` (`ORC_WS`). `build.sh` stops if the snippets aren't there.
+- `build.sh` exports `ORC_WS_VERSION`, the orc ws version this repo expects, and generates `ws_models.go` (the `WsConn` type) with `${ORC_WS}/models.sh`. `main.sh` passes the same version to `${ORC_WS}/snippets/import.sh`. Both fail the build if orc has a different version. `ws_models.go` is generated and ignored by git, like `main.go`.
 - After any change, run `./build.sh && go vet ./... && go test -race ./...`.
 - `server_test.go` tests the server end to end by building and running the binary, since the server is inlined in `main()`. `integration_test.go` runs the server with two real clients. When you change server or client behavior, update or add a test. CI runs the same checks on pull requests into `main` (`.github/workflows/test.yml`).
 
 ## Server code: imperative, readable start to end
 
-Server code is written as imperative orc subscripts, inlined into `main`, not as Go functions or methods. Someone reading the generated server should be able to read it from top to bottom in order, like literate programming.
+Server code is written as imperative orc subscripts, inlined into `main`, not as Go functions or methods. The server is one loop in one goroutine that handles one match at a time: each pass of the loop either handles one connection while players join or plays one turn once they're matched, chosen by `if !matched { ... } else { ... }`. Someone reading the generated server should be able to read it from top to bottom in order, like literate programming.
 
-- Put each server step in its own subscript (`main-<name>.sh`), inlined where it runs. Don't add server functions or methods.
-- A step used in several places (`main-send.sh`, `main-notify-end.sh`, `main-remove.sh`) is one subscript inlined at each call site. If it should only run sometimes, bind a `When` bool and gate its steps on `${!when}`, rather than wrapping the call site in an `if`.
-- A loop is driven by a flag, not `break`: `for reading := claimed; reading; { ... }`, where the body sets `reading = false`. Put a long loop body in its own subscript (`main-handle-ws-read.sh`).
-- No `defer`: inlined code runs inside the enclosing handler, so a `defer` would wait until the handler returns. Unlock explicitly.
+- Put each server step in its own subscript (`main-<name>.sh`). Don't add server functions or methods.
+- `main.sh` calls every step directly, in order, and steps are leaves: a subscript never inlines another subscript. The server loop in `main.sh` is the whole outline of the server: a list of steps, with the loops and `if`s that decide which steps run.
+- Websocket protocol code lives in orc's ws snippets, which `main.sh` calls like any other step: `` ` ${ORC_WS}/snippets/read-frame.sh ${v}pl_ ` ``. They are leaves too. Keep websocket protocol code (handshake, framing, masking) in orc, and app logic (routing, players, matches) in this repo. See orc's `lib/src/templates/go/com/koreyhinton/ws/README.md`.
+- Join steps are named `main-join-*.sh` and play steps `main-play-*.sh`. A step used in several places (`${ORC_WS}/snippets/write-json.sh`, `main-player-conn.sh`, `main-player-sent.sh`, `main-player-close.sh`, `main-match-end.sh`) is one subscript called at each place.
+- A step that runs only in some cases gets an `if` around its call in `main.sh` (`if isWS { ... }`, `if ended && connected { ... }`). It doesn't bind a bool to cancel itself. That includes shared steps: `write-json.sh` is called as `if connected { ... }` or `if taken { ... }`.
+- A step can declare variables that later steps use. Go scoping still applies: a variable declared inside an `if` or loop in `main.sh` is gone after it. So declare a value that's needed after the block in an earlier step, outside it. `main-join-route.sh` declares `taken`, and `main-join-claim.sh` sets it inside `if isWS`.
+- A loop is driven by a flag, not `break`: `for reading := true; reading; { ... }`, where a step sets `reading = false`. The loop sits in `main.sh`, and its body is a list of steps.
+- No `defer`: inlined code runs inside `main`, so a `defer` would wait until the server exits.
+- No callbacks, goroutines or locks on the server. Code that would wait on a timer checks a deadline in the loop instead (`main-join-accept.sh` sets the listener's deadline to the match's join deadline). The server speaks HTTP and websockets itself, with `net`, `net/http` request parsing and orc's ws snippets, so it doesn't use gorilla.
 - This applies to server code only. Leave client code (`runClient`, `Sim`) and `demo/` in their current form.
 
-### Control flow inside a subscript
+### Control flow
 
 - No `return`, `break`, `continue` or `goto`. Execution always reaches the end of the subscript.
-- No `if` nested inside another `if`. Explicit `if` statements are fine.
-- Instead, assign named bools and test them in flat `if`s with compound conditions:
+- No `if` whose body is only another `if`, in a subscript or in `main.sh`. That's one condition split in two, so write it as one: `if a && b { ... }`, not `if a { if b { ... } }`. An `if` can contain other `if`s when its body has more steps than that, as in the server loop:
 
   ```go
-  isPost := r.Method == http.MethodPost
-  hasWaiting := s.waiting != nil
-  if isPost && hasWaiting { ... }
-  if isPost && !hasWaiting { ... }
-  ```
-
-- When a lock must cover several steps, take it in one `if` and release it in a later `if` with the same condition. Add a comment saying so.
-- When Go needs a func value as a callback (for example `time.AfterFunc`), define the closure at the top level of the subscript and pass it in. Put the closure's body in its own subscript, named after the parent (`main-handle-match.sh` → `main-handle-match-expire.sh`), so its `if`s are top-level in that file and not indented inside the closure. Bind the closure's parameters and any names it uses from the parent (pass a bound name on as `${!s}`):
-
-  ```bash
-  export ${v}xp_M=m
-  export ${v}xp_S=${!s}
-  ...
-  	expire := func(m *Match) {
-  		` ./main-handle-match-expire.sh ${v}xp_ `
+  if accepted {
+  	` ${ORC_WS}/snippets/read-request.sh ${v}jn_ `
+  	if isMatch {
+  		` ./main-handle-match.sh ${v}jn_ `
   	}
+  	...
+  }
   ```
 
-  Go indents with tabs, which look wide in Emacs, so this keeps the nesting shallow where the code is written.
+- To run exactly one of two steps, use `if`/`else` on one bool, as the server loop does with `matched`. The `else` shows that only one branch runs, so a change one branch makes to the bool is only seen on the next pass.
+- Inside a step, assign named bools and test them in flat `if`s with compound conditions:
+
+  ```go
+  isPost := req.Method == http.MethodPost
+  isNew := isPost && s.match == nil
+  if isPost && isNew { ... }
+  if isPost && !isNew { ... }
+  ```
 
 ### Subscript format and binding
 
@@ -52,7 +56,7 @@ Server code is written as imperative orc subscripts, inlined into `main`, not as
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} R W S
+. ${NSMAP}/bind ${v} S Req Taken
 
 cat << EOF
 	first line has one leading tab
@@ -60,16 +64,18 @@ cat << EOF
 EOF
 ```
 
-- The caller exports one name per bound variable, then inlines the subscript:
+- `main.sh` exports one name per bound variable, then calls the subscript:
 
   ```bash
-  export ${v}hdl_mtch_R=r
+  export ${v}jn_Req=req
   ...
-  	` ./main-handle-match.sh ${v}hdl_mtch_ `
+  	` ./main-handle-match.sh ${v}jn_ `
   ```
 
-- Inside the subscript, refer to bound variables as `${!r}`, `${!w}`, `${!s}`.
-- Bind every local from the calling scope that the subscript uses. Package-level names don't need binding: imports, types, and globals such as `upgrader`.
+- Steps that run together share one namespace: `jn_` for join, `js_` for join's per-player start and end notices, and `pl_` for play. `main.sh` exports only the names it uses itself (`accepted`, `ready`, `p`, ...). Every other bound name keeps its namespaced name in `main.go` (`mn_jn_Body`), so it needs no export. Export an alias when two bound names must be the same variable: `export ${v}jn_Msg=${v}jn_TakenMsg` makes `write-json.sh`'s `Msg` the taken message, and `export ${v}js_M=${v}jn_M` gives the notice loop join's match. In a namespace, a bound name means one variable in every step that uses it. When two steps need the same name for different variables, give one of them a more specific name (`read-frame.sh` binds `ReadErr` and `write-json.sh` binds `WriteErr`, so they don't clash in `pl_`), or use a separate namespace (`js_`, where `Ws` is player p's websocket, separate from join's).
+- Inside the subscript, refer to bound variables as `${!s}`, `${!req}`, `${!taken}`. `bind` lowercases names and turns CamelCase into snake_case (`ContentType` → `${!content_type}`).
+- Bind every local from the calling scope that the subscript uses. Package-level names don't need binding: imports, types, and constants such as `maxMessage`.
+- Also bind every variable a step declares for a later step or for `main.sh` to use, and declare it through its bound name: `${!code}, ${!body} := ...`, not `code, body := ...`. Then the step works whatever name `main.sh` maps it to, or with no export at all (`bind` then names it after the namespace, such as `mn_jn_Body`). Variables used only inside the step can keep plain names.
 - Prefer binding one struct (such as `S` for `*Server`) over binding many separate variables.
-- Package-level server values that `main.sh` doesn't use directly go in `models.go`.
+- Package-level server values that `main.sh` doesn't use directly go in `models.go`. Websocket types come from orc (`WsConn` in `ws_models.go`), so don't redefine them here.
 - The heredoc is unquoted, so escape `$` and backticks in Go code (or keep them out of it). Leave `%s` format verbs alone when replacing a bound `s`.

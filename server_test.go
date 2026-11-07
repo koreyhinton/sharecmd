@@ -182,8 +182,13 @@ func TestMatch(t *testing.T) {
 	if mr0.MatchID != mr1.MatchID || mr0.Player != 0 || mr1.Player != 1 {
 		t.Fatalf("join: got %+v and %+v", mr0, mr1)
 	}
-	a, b := dialWS(t, addr, mr0.MatchID, 0), dialWS(t, addr, mr0.MatchID, 1)
+	a := dialWS(t, addr, mr0.MatchID, 0)
 
+	// The server only takes connections while players are joining. A second
+	// websocket for a slot that's already open is turned away.
+	wantEnd(t, dialWS(t, addr, mr0.MatchID, 0), "slot taken or match over")
+
+	b := dialWS(t, addr, mr0.MatchID, 1)
 	sa, sb := readMsg(t, a), readMsg(t, b)
 	if sa.Type != "start" || sb.Type != "start" || sa.Player != 0 || sb.Player != 1 || sa.Seed != sb.Seed {
 		t.Fatalf("start: got %+v and %+v", sa, sb)
@@ -210,11 +215,6 @@ func TestMatch(t *testing.T) {
 	wantTurn(t, a, 2, nil, []string{"b2"})
 	wantTurn(t, b, 2, nil, []string{"b2"})
 
-	t.Run("slot taken", func(t *testing.T) {
-		c := dialWS(t, addr, mr0.MatchID, 0)
-		wantEnd(t, c, "slot taken or match over")
-	})
-
 	t.Run("too far ahead ends match", func(t *testing.T) {
 		sendCmds(t, a, 3+50+1, "far") // next turn is 3, default -max-ahead is 50
 		wantEnd(t, a, "more than 50 turns ahead")
@@ -230,7 +230,44 @@ func TestDisconnect(t *testing.T) {
 	readMsg(t, a)
 	readMsg(t, b)
 	b.Close()
+	// The server reads player 0's turn before player 1's, so it notices the
+	// disconnect once player 0 sends something. Real clients send every turn.
+	sendCmds(t, a, 0)
 	wantEnd(t, a, "player 1 disconnected")
+}
+
+func TestMatchInProgress(t *testing.T) {
+	addr := startServer(t, 30*time.Second)
+	joinMatch(t, addr)
+	joinMatch(t, addr)
+
+	// Matches run one at a time, so a third player is turned away.
+	res, err := http.Post("http://"+addr+"/match", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("third join: got %d, want %d", res.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// TestLargeMessage sends a command bigger than gorilla's 4 KB write buffer, so
+// the client splits it over several frames, and the server's reply needs the
+// 8-byte length form.
+func TestLargeMessage(t *testing.T) {
+	addr := startServer(t, 30*time.Second)
+	id := joinMatch(t, addr).MatchID
+	joinMatch(t, addr)
+	a, b := dialWS(t, addr, id, 0), dialWS(t, addr, id, 1)
+	readMsg(t, a)
+	readMsg(t, b)
+
+	big := strings.Repeat("x", 100_000)
+	sendCmds(t, a, 0, big)
+	sendCmds(t, b, 0, "b0")
+	wantTurn(t, a, 0, []string{big}, []string{"b0"})
+	wantTurn(t, b, 0, []string{big}, []string{"b0"})
 }
 
 func TestJoinTimeout(t *testing.T) {

@@ -1,12 +1,38 @@
 #!/bin/bash
 v=${1:-mn_}
 # maps
-export ${v}hdl_ws_R=r
-export ${v}hdl_ws_W=w
-export ${v}hdl_ws_S=s
-export ${v}hdl_mtch_R=r
-export ${v}hdl_mtch_W=w
-export ${v}hdl_mtch_S=s
+# Websocket steps come from orc's ws snippets (${ORC_WS}/snippets).
+export WS_MAX_MESSAGE=maxMessage
+
+# Only names main.sh uses are exported. Other bound names default to their
+# namespaced name (such as mn_jn_Body), shared by every step in the namespace.
+# join: handle one connection, then start or expire the match
+export ${v}jn_S=s
+export ${v}jn_Listener=ln
+export ${v}jn_Matched=matched
+export ${v}jn_Accepted=accepted
+export ${v}jn_IsMatch=isMatch
+export ${v}jn_IsWs=isWS
+export ${v}jn_Found=found
+export ${v}jn_Ready=ready
+export ${v}jn_Expired=expired
+export ${v}jn_Taken=taken
+export ${v}jn_Msg=${v}jn_TakenMsg
+export ${v}jn_WriteErr=${v}jn_TakenErr
+# join: send player p their start or end notice
+export ${v}js_P=p
+export ${v}js_Ready=ready
+export ${v}js_Expired=expired
+export ${v}js_Connected=connected
+export ${v}js_M=${v}jn_M
+# play: one turn
+export ${v}pl_S=s
+export ${v}pl_Matched=matched
+export ${v}pl_P=p
+export ${v}pl_Reading=reading
+export ${v}pl_Framing=framing
+export ${v}pl_Ended=ended
+export ${v}pl_Connected=connected
 
 cat << EOF
 // Deterministic lockstep relay for a 2-player RTS.
@@ -22,20 +48,23 @@ cat << EOF
 //  5. Once both players have sent turn N, the server sends both command lists for
 //     turn N to both clients, always in player order. Both sims run the same inputs
 //     in the same order, so they stay in sync.
+//
+// The server runs one match at a time in a single loop. Each pass either takes
+// one connection while players join, or plays one turn once they're matched.
 package main
 
 import (
-	"bufio"
-	"encoding/json"
+EOF
+
+	${ORC_WS}/snippets/import.sh "${ORC_WS_VERSION}" || exit 1
+
+cat << EOF
 	"flag"
-	"fmt"
 	"log"
 	"math/rand"
-	"net/http"
+	"net"
 	"net/url"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/gorilla/websocket"
@@ -220,17 +249,89 @@ func main() {
 	switch *mode {
 	case "server":
 		// run server
-		s := &Server{matches: map[string]*Match{}, joinTimeout: *joinTimeout, maxAhead: *maxAhead}
-		handleMatch := func(w http.ResponseWriter, r *http.Request) {
-			` ./main-handle-match.sh ${v}hdl_mtch_ `
+		s := &Server{joinTimeout: *joinTimeout, maxAhead: *maxAhead}
+		tcpAddr, err := net.ResolveTCPAddr("tcp", *addr)
+		if err != nil {
+			log.Fatal("listen: ", err)
 		}
-		handleWS := func(w http.ResponseWriter, r *http.Request) {
-			` ./main-handle-ws.sh ${v}hdl_ws_ `
+		ln, err := net.ListenTCP("tcp", tcpAddr)
+		if err != nil {
+			log.Fatal("listen: ", err)
 		}
-		http.HandleFunc("/match", handleMatch)
-		http.HandleFunc("/ws", handleWS)
 		log.Println("lockstep server listening on", *addr)
-		log.Fatal(http.ListenAndServe(*addr, nil))
+		// The server runs until it's stopped. Each pass takes one step: while
+		// players are joining, it handles one connection; once they're matched,
+		// it plays one turn. Joining sets matched when the match starts, and
+		// playing clears it when the match ends.
+		matched := false
+		for serving := true; serving; {
+			if !matched {
+				` ./main-join-accept.sh ${v}jn_ `
+				if accepted {
+					` ${ORC_WS}/snippets/read-request.sh ${v}jn_ `
+					` ./main-join-route.sh ${v}jn_ `
+					if isMatch {
+						` ./main-handle-match.sh ${v}jn_ `
+					}
+					if isWS {
+						` ./main-handle-ws.sh ${v}jn_ `
+						if found {
+							` ${ORC_WS}/snippets/upgrade.sh ${v}jn_ `
+							` ./main-join-claim.sh ${v}jn_ `
+							if taken {
+								` ${ORC_WS}/snippets/write-json.sh ${v}jn_ `
+							}
+						}
+					}
+					` ./main-join-reply.sh ${v}jn_ `
+				}
+				` ./main-join-check.sh ${v}jn_ `
+				for p := 0; (ready || expired) && p < 2; p++ {
+					` ./main-join-notice.sh ${v}js_ `
+					` ./main-player-conn.sh ${v}js_ `
+					if connected {
+						` ${ORC_WS}/snippets/write-json.sh ${v}js_ `
+					}
+					` ./main-player-sent.sh ${v}js_ `
+					if expired && connected {
+						` ./main-player-close.sh ${v}js_ `
+					}
+				}
+				if expired {
+					` ./main-match-end.sh ${v}jn_ `
+				}
+				if ready {
+					` ./main-join-start.sh ${v}jn_ `
+				}
+			} else {
+				` ./main-play-begin.sh ${v}pl_ `
+				for p := 0; p < 2; p++ {
+					for reading := true; reading; {
+						` ./main-play-need.sh ${v}pl_ `
+						if reading {
+							for framing := true; framing; {
+								` ${ORC_WS}/snippets/read-frame.sh ${v}pl_ `
+							}
+							` ./main-read-cmds.sh ${v}pl_ `
+						}
+					}
+				}
+				` ./main-play-outcome.sh ${v}pl_ `
+				for p := 0; p < 2; p++ {
+					` ./main-player-conn.sh ${v}pl_ `
+					if connected {
+						` ${ORC_WS}/snippets/write-json.sh ${v}pl_ `
+					}
+					` ./main-player-sent.sh ${v}pl_ `
+					if ended && connected {
+						` ./main-player-close.sh ${v}pl_ `
+					}
+				}
+				if ended {
+					` ./main-match-end.sh ${v}pl_ `
+				}
+			}
+		}
 	case "client":
 		if *ticksPerTurn < 1 || *delay < 1 {
 			log.Fatal("ticks-per-turn and delay must be >= 1")

@@ -12,7 +12,7 @@
 > 2. Make the Emacs frame full screen (`M-x toggle-frame-fullscreen`), then split it into two side-by-side portrait windows with `C-x 3`.
 > 3. Open `main.sh` (`C-x C-f main.sh`) and turn on wik-mode (`M-x wik-mode`).
 > 4. Search for `main(` (`C-s main(`) to jump to the start of the program.
-> 5. Read down from there. On a subscript line, such as `` ` ./main-handle-match.sh ${v}hdl_mtch_ ` ``, press `C-c <down>` to open the subscript and `C-c <up>` to close it.
+> 5. Read down from there. On a subscript line, such as `` ` ./main-join-accept.sh ${v}jn_ ` ``, press `C-c <down>` to open the subscript and `C-c <up>` to close it.
 
 A deterministic lockstep relay for a 2-player RTS game, plus a demo client.
 
@@ -26,7 +26,7 @@ For a playable demo game (Rust + macroquad, desktop and browser), see [demo/READ
 ./build.sh
 ```
 
-This expects the `orc` repo to be checked out next to this one (it reads `../orc/lib/src/main/bash/com/koreyhinton/nsmap`). Run it again whenever you change `main.sh` or any of its `main-*.sh` subscripts.
+This expects the `orc` repo to be checked out next to this one. It reads `bind` from `../orc/lib/src/main/bash/com/koreyhinton/nsmap` and the websocket snippets from `../orc/lib/src/templates/go/com/koreyhinton/ws`. It also generates `ws_models.go` (the `WsConn` type) from orc's `ws/models.sh`. Run it again whenever you change `main.sh`, any of its `main-*.sh` subscripts, or the orc snippets.
 
 ## Test it
 
@@ -45,19 +45,19 @@ Open three terminals in this folder.
 **Terminal 1: server**
 
 ```sh
-go run main.go models.go -mode server -addr :8080
+go run . -mode server -addr :8080
 ```
 
 **Terminal 2: player 0**
 
 ```sh
-go run main.go models.go -mode client -server http://localhost:8080
+go run . -mode client -server http://localhost:8080
 ```
 
 **Terminal 3: player 1**
 
 ```sh
-go run main.go models.go -mode client -server http://localhost:8080
+go run . -mode client -server http://localhost:8080
 ```
 
 The first client to connect becomes player 0 and the second becomes player 1. When both are connected, the match starts. Type a command in either client and press Enter. Both clients will print it on the same turn.
@@ -84,6 +84,8 @@ Type only the command, not JSON. The client adds the JSON wrapper itself. Over t
 
 ## Server options
 
+The server runs one match at a time. While a match is being played it doesn't take new connections, and once two players have joined, more calls to `POST /match` get `503` until that match is over. Clients must send a `cmds` message every turn, even an empty one, or the match stalls.
+
 | Flag | Default | Meaning |
 |---|---|---|
 | `-addr` | `:8080` | Address to listen on |
@@ -93,7 +95,7 @@ Type only the command, not JSON. The client adds the JSON wrapper itself. Over t
 Example with a shorter join timeout:
 
 ```sh
-go run main.go models.go -mode server -addr :8080 -join-timeout 10s
+go run . -mode server -addr :8080 -join-timeout 10s
 ```
 
 ## Client options
@@ -108,5 +110,5 @@ go run main.go models.go -mode server -addr :8080 -join-timeout 10s
 Example with a longer delay for a slow connection:
 
 ```sh
-go run main.go models.go -mode client -server http://localhost:8080 -delay 4
+go run . -mode client -server http://localhost:8080 -delay 4
 ```

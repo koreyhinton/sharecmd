@@ -1,49 +1,39 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} R W S
-export ${v}xp_M=m
-export ${v}xp_S=${!s}
+. ${NSMAP}/bind ${v} S Req Code Body Header
 
 cat << EOF
-	isPost := ${!r}.Method == http.MethodPost
+	// POST /match gives the caller a slot: player 0 starts a new match and
+	// player 1 fills it. Matches run one at a time, so once both slots are
+	// given out, later callers are turned away until the match is over.
+	isPost := ${!req}.Method == http.MethodPost
 	if !isPost {
-		http.Error(${!w}, "POST only", http.StatusMethodNotAllowed)
+		${!code}, ${!body} = http.StatusMethodNotAllowed, "POST only\n"
 	}
-
-	// expire ends a new match if both players haven't opened their websocket in time,
-	// so nobody waits forever on a player who called /match and then went away.
-	expire := func(m *Match) {
-		` ./main-handle-match-expire.sh ${v}xp_ `
-	}
-
-	${!s}.mu.Lock()
-	m := ${!s}.waiting
-	hasWaiting := m != nil
-	var resp MatchResp
-	if isPost && hasWaiting {
-		${!s}.waiting = nil
-		resp = MatchResp{MatchID: m.id, Player: 1}
-	}
-	if isPost && !hasWaiting {
+	isNew := isPost && ${!s}.match == nil
+	if isNew {
 		${!s}.nextID++
-		m = &Match{
-			id:      fmt.Sprintf("m%d", ${!s}.nextID),
-			seed:    rand.Int63(),
-			pending: map[int]*[2][]json.RawMessage{},
-			got:     map[int]*[2]bool{},
+		${!s}.match = &Match{
+			id:       fmt.Sprintf("m%d", ${!s}.nextID),
+			seed:     rand.Int63(),
+			deadline: time.Now().Add(${!s}.joinTimeout),
+			pending:  map[int]*[2][]json.RawMessage{},
+			got:      map[int]*[2]bool{},
 		}
-		${!s}.matches[m.id] = m
-		${!s}.waiting = m
-		resp = MatchResp{MatchID: m.id, Player: 0}
-		time.AfterFunc(${!s}.joinTimeout, func() { expire(m) })
 	}
-	${!s}.mu.Unlock()
-
-	if isPost {
-		${!w}.Header().Set("Content-Type", "application/json")
+	full := isPost && ${!s}.match.joined == 2
+	if full {
+		${!code}, ${!body} = http.StatusServiceUnavailable, "a match is in progress, try again later\n"
+	}
+	hasSlot := isPost && !full
+	if hasSlot {
+		resp := MatchResp{MatchID: ${!s}.match.id, Player: ${!s}.match.joined}
+		${!s}.match.joined++
+		b, _ := json.Marshal(resp)
+		${!code}, ${!body} = http.StatusOK, string(b)+"\n"
+		${!header}.Set("Content-Type", "application/json")
 		// Lets a browser client served from another port (like demo/web) read the reply.
-		${!w}.Header().Set("Access-Control-Allow-Origin", "*")
-		json.NewEncoder(${!w}).Encode(resp)
+		${!header}.Set("Access-Control-Allow-Origin", "*")
 	}
 EOF

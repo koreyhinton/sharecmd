@@ -3,11 +3,7 @@ package main
 import (
 	"encoding/json"
 	"math/rand"
-	"net/http"
-	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 // ---------- Protocol ----------
@@ -30,26 +26,25 @@ type MatchResp struct {
 
 // ---------- Server ----------
 
-// upgrader turns /ws requests into websocket connections. It accepts any origin.
-var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+// maxMessage is the largest websocket message the server reads, in bytes.
+const maxMessage = 1 << 20
 
 type Match struct {
-	id   string
-	seed int64
+	id       string
+	seed     int64
+	joined   int       // players given a slot by POST /match
+	deadline time.Time // both players must open their websocket by then
 
-	mu       sync.Mutex
-	conns    [2]*websocket.Conn
-	writeMu  [2]sync.Mutex // gorilla allows only one writer per conn at a time
+	players  [2]*WsConn // each player's websocket, nil until they connect (WsConn is generated into ws_models.go)
 	nextTurn int
 	pending  map[int]*[2][]json.RawMessage
 	got      map[int]*[2]bool
-	ended    bool
+	reason   string // why the match ended; empty while it's on
 }
 
+// Server runs one match at a time.
 type Server struct {
-	mu          sync.Mutex
-	matches     map[string]*Match
-	waiting     *Match // match with one player, waiting for a second
+	match       *Match // the match players are joining or playing, or nil
 	nextID      int
 	joinTimeout time.Duration // both players must connect within this long
 	maxAhead    int           // furthest a client may send past the current turn
