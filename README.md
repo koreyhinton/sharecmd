@@ -12,7 +12,7 @@
 > 2. Make the Emacs frame full screen (`M-x toggle-frame-fullscreen`), then split it into two side-by-side portrait windows with `C-x 3`.
 > 3. Open `main.sh` (`C-x C-f main.sh`) and turn on wik-mode (`M-x wik-mode`).
 > 4. Search for `main(` (`C-s main(`) to jump to the start of the program.
-> 5. Read down from there. On a subscript line, such as `` ` ./main-handle-match.sh ${v}hdl_mtch_ ` ``, press `C-c <down>` to open the subscript and `C-c <up>` to close it.
+> 5. Read down from there. On a subscript line, such as `` ` ./main-join.sh ${v}jn_ ` ``, press `C-c <down>` to open the subscript and `C-c <up>` to close it.
 
 A deterministic lockstep relay for a 2-player RTS game, plus a demo client.
 
@@ -83,6 +83,8 @@ Type only the command, not JSON. The client adds the JSON wrapper itself. Over t
 ```
 
 ## Server options
+
+The server runs one match at a time. While a match is being played it doesn't take new connections, and once two players have joined, more calls to `POST /match` get `503` until that match is over. Clients must send a `cmds` message every turn, even an empty one, or the match stalls.
 
 | Flag | Default | Meaning |
 |---|---|---|

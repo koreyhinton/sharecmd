@@ -11,40 +11,37 @@
 
 ## Server code: imperative, readable start to end
 
-Server code is written as imperative orc subscripts, inlined into `main`, not as Go functions or methods. Someone reading the generated server should be able to read it from top to bottom in order, like literate programming.
+Server code is written as imperative orc subscripts, inlined into `main`, not as Go functions or methods. The server is one loop in one goroutine that handles one match at a time: each pass of the loop either handles one connection while players join (`main-join.sh`) or plays one turn once they're matched (`main-play.sh`), chosen by `if !matched { ... } else { ... }`. Someone reading the generated server should be able to read it from top to bottom in order, like literate programming.
 
 - Put each server step in its own subscript (`main-<name>.sh`), inlined where it runs. Don't add server functions or methods.
-- A step used in several places (`main-send.sh`, `main-notify-end.sh`, `main-remove.sh`) is one subscript inlined at each call site. If it should only run sometimes, bind a `When` bool and gate its steps on `${!when}`, rather than wrapping the call site in an `if`.
-- A loop is driven by a flag, not `break`: `for reading := claimed; reading; { ... }`, where the body sets `reading = false`. Put a long loop body in its own subscript (`main-handle-ws-read.sh`).
-- No `defer`: inlined code runs inside the enclosing handler, so a `defer` would wait until the handler returns. Unlock explicitly.
+- A step used in several places (`main-send.sh`, `main-notify-end.sh`, `main-write-frame.sh`) is one subscript inlined at each call site. If it should only run sometimes, bind a `When` bool and gate its steps on `${!when}`. A whole step that runs in only one case, such as `main-join.sh` and `main-play.sh` in the server loop, can instead be inlined inside an `if` or `else` at its call site.
+- A loop is driven by a flag, not `break`: `for reading := true; reading; { ... }`, where the body sets `reading = false`. Put a long loop body in its own subscript (`main-read-cmds.sh`).
+- No `defer`: inlined code runs inside `main`, so a `defer` would wait until the server exits.
+- No callbacks, goroutines or locks on the server. Code that would wait on a timer checks a deadline in the loop instead (`main-join.sh` sets the listener's deadline to the match's join deadline). The server speaks HTTP and websockets itself, with `net`, `net/http` request parsing and hand-written frames, so it doesn't use gorilla.
 - This applies to server code only. Leave client code (`runClient`, `Sim`) and `demo/` in their current form.
 
 ### Control flow inside a subscript
 
 - No `return`, `break`, `continue` or `goto`. Execution always reaches the end of the subscript.
-- No `if` nested inside another `if`. Explicit `if` statements are fine.
+- No `if` whose body is only another `if`. That's one condition split in two, so write it as one: `if a && b { ... }`, not `if a { if b { ... } }`. An `if` can contain other `if`s when its body has more steps than that, as in the server loop:
+
+  ```go
+  if !matched {
+  	// main-join.sh: several steps, some with their own ifs
+  } else {
+  	// main-play.sh
+  }
+  ```
+
+- To run exactly one of two steps, use `if`/`else` on one bool, as the server loop does with `matched`. The `else` shows that only one branch runs, so a change one branch makes to the bool is only seen on the next pass.
 - Instead, assign named bools and test them in flat `if`s with compound conditions:
 
   ```go
-  isPost := r.Method == http.MethodPost
-  hasWaiting := s.waiting != nil
-  if isPost && hasWaiting { ... }
-  if isPost && !hasWaiting { ... }
+  isPost := req.Method == http.MethodPost
+  isNew := isPost && s.match == nil
+  if isPost && isNew { ... }
+  if isPost && !isNew { ... }
   ```
-
-- When a lock must cover several steps, take it in one `if` and release it in a later `if` with the same condition. Add a comment saying so.
-- When Go needs a func value as a callback (for example `time.AfterFunc`), define the closure at the top level of the subscript and pass it in. Put the closure's body in its own subscript, named after the parent (`main-handle-match.sh` → `main-handle-match-expire.sh`), so its `if`s are top-level in that file and not indented inside the closure. Bind the closure's parameters and any names it uses from the parent (pass a bound name on as `${!s}`):
-
-  ```bash
-  export ${v}xp_M=m
-  export ${v}xp_S=${!s}
-  ...
-  	expire := func(m *Match) {
-  		` ./main-handle-match-expire.sh ${v}xp_ `
-  	}
-  ```
-
-  Go indents with tabs, which look wide in Emacs, so this keeps the nesting shallow where the code is written.
 
 ### Subscript format and binding
 
@@ -52,7 +49,7 @@ Server code is written as imperative orc subscripts, inlined into `main`, not as
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} R W S
+. ${NSMAP}/bind ${v} S Req When
 
 cat << EOF
 	first line has one leading tab
@@ -63,13 +60,13 @@ EOF
 - The caller exports one name per bound variable, then inlines the subscript:
 
   ```bash
-  export ${v}hdl_mtch_R=r
+  export ${v}mt_Req=req
   ...
-  	` ./main-handle-match.sh ${v}hdl_mtch_ `
+  	` ./main-handle-match.sh ${v}mt_ `
   ```
 
-- Inside the subscript, refer to bound variables as `${!r}`, `${!w}`, `${!s}`.
-- Bind every local from the calling scope that the subscript uses. Package-level names don't need binding: imports, types, and globals such as `upgrader`.
+- Inside the subscript, refer to bound variables as `${!s}`, `${!req}`, `${!when}`. `bind` lowercases names and turns CamelCase into snake_case (`ContentType` → `${!content_type}`).
+- Bind every local from the calling scope that the subscript uses. Package-level names don't need binding: imports, types, and constants such as `maxMessage`.
 - Prefer binding one struct (such as `S` for `*Server`) over binding many separate variables.
 - Package-level server values that `main.sh` doesn't use directly go in `models.go`.
 - The heredoc is unquoted, so escape `$` and backticks in Go code (or keep them out of it). Leave `%s` format verbs alone when replacing a bound `s`.

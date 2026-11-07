@@ -1,94 +1,56 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} R W S
-export ${v}st_M=m
-export ${v}st_P=p
-export ${v}st_Msg=start
-export ${v}rd_M=m
-export ${v}rd_S=${!s}
-export ${v}rd_Conn=conn
-export ${v}rd_Player=player
-export ${v}rd_Reason=reason
-export ${v}rd_Reading=reading
-export ${v}ne_M=m
-export ${v}ne_Reason=reason
-export ${v}ne_When=endNow
-export ${v}rm_S=${!s}
-export ${v}rm_M=m
-export ${v}rm_When=claimed
+. ${NSMAP}/bind ${v} S Req Conn Reader Code Body Keep Switched When
+export ${v}wf_Conn=${!conn}
+export ${v}wf_Msg=taken
+export ${v}wf_Err=takenErr
+export ${v}wf_When=isTaken
 
 cat << EOF
-	id := ${!r}.URL.Query().Get("match")
+	// GET /ws?match=ID&player=N opens player N's websocket in the current match.
+	query, reqHeader := url.Values{}, http.Header{}
+	if ${!when} {
+		query, reqHeader = ${!req}.URL.Query(), ${!req}.Header
+	}
 	var player int
-	_, err := fmt.Sscan(${!r}.URL.Query().Get("player"), &player)
-	validPlayer := err == nil && player >= 0 && player <= 1
-	if !validPlayer {
-		http.Error(${!w}, "bad player", http.StatusBadRequest)
+	_, playerErr := fmt.Sscan(query.Get("player"), &player)
+	validPlayer := ${!when} && playerErr == nil && player >= 0 && player <= 1
+	if ${!when} && !validPlayer {
+		${!code}, ${!body} = http.StatusBadRequest, "bad player\n"
 	}
-
-	${!s}.mu.Lock()
-	m := ${!s}.matches[id]
-	${!s}.mu.Unlock()
-	found := m != nil
+	found := validPlayer && ${!s}.match != nil && ${!s}.match.id == query.Get("match")
 	if validPlayer && !found {
-		http.Error(${!w}, "no such match", http.StatusNotFound)
+		${!code}, ${!body} = http.StatusNotFound, "no such match\n"
 	}
 
-	var conn *websocket.Conn
-	var upgradeErr error
-	if validPlayer && found {
-		conn, upgradeErr = upgrader.Upgrade(${!w}, ${!r}, nil)
+	// Finish the websocket handshake (RFC 6455, section 4.2.2).
+	key := reqHeader.Get("Sec-WebSocket-Key")
+	isUpgrade := found && strings.EqualFold(reqHeader.Get("Upgrade"), "websocket") && key != ""
+	if found && !isUpgrade {
+		${!code}, ${!body} = http.StatusBadRequest, "not a websocket handshake\n"
 	}
-	upgraded := conn != nil
-	if upgradeErr != nil {
-		log.Println("upgrade:", upgradeErr)
+	if isUpgrade {
+		sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+		accept := base64.StdEncoding.EncodeToString(sum[:])
+		fmt.Fprintf(${!conn}, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", accept)
+		${!conn}.SetDeadline(time.Time{})
+		${!switched} = true
 	}
 
-	// Take the player's slot. m.mu is held from the first if through the last.
-	claimed, ready := false, false
-	if upgraded {
-		m.mu.Lock()
-		claimed = m.conns[player] == nil && !m.ended
-	}
+	// Take the player's slot, or turn the connection away if it's taken.
+	claimed := isUpgrade && ${!s}.match.conns[player] == nil
 	if claimed {
-		m.conns[player] = conn
-		ready = m.conns[0] != nil && m.conns[1] != nil
+		${!s}.match.conns[player] = ${!conn}
+		${!s}.match.readers[player] = ${!reader}
+		${!keep} = true
+		log.Printf("[%s] player %d connected", ${!s}.match.id, player)
 	}
-	if upgraded {
-		m.mu.Unlock()
+	isTaken := isUpgrade && !claimed
+	taken := Msg{Type: "end", Reason: "slot taken or match over"}
+	var takenErr error
+	` ./main-write-frame.sh ${v}wf_ `
+	if takenErr != nil {
+		log.Println("write:", takenErr)
 	}
-
-	if upgraded && !claimed {
-		conn.WriteJSON(Msg{Type: "end", Reason: "slot taken or match over"})
-		conn.Close()
-	}
-	if claimed {
-		log.Printf("[%s] player %d connected", m.id, player)
-	}
-	for p := 0; ready && p < 2; p++ {
-		start := Msg{Type: "start", Player: p, Seed: m.seed}
-		` ./main-send.sh ${v}st_ `
-	}
-	if ready {
-		log.Printf("[%s] started, seed=%d", m.id, m.seed)
-	}
-
-	// Handle this player's messages until they disconnect or break the rules.
-	// reason says why the match should end.
-	var reason string
-	for reading := claimed; reading; {
-		` ./main-handle-ws-read.sh ${v}rd_ `
-	}
-
-	// End the match. Only the first handler to get here tells the players.
-	endNow := false
-	if claimed {
-		m.mu.Lock()
-		endNow = !m.ended
-		m.ended = true
-		m.mu.Unlock()
-	}
-	` ./main-notify-end.sh ${v}ne_ `
-	` ./main-remove.sh ${v}rm_ `
 EOF

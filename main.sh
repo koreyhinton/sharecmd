@@ -1,12 +1,11 @@
 #!/bin/bash
 v=${1:-mn_}
 # maps
-export ${v}hdl_ws_R=r
-export ${v}hdl_ws_W=w
-export ${v}hdl_ws_S=s
-export ${v}hdl_mtch_R=r
-export ${v}hdl_mtch_W=w
-export ${v}hdl_mtch_S=s
+export ${v}jn_S=s
+export ${v}jn_Listener=ln
+export ${v}jn_Matched=matched
+export ${v}pl_S=s
+export ${v}pl_Matched=matched
 
 cat << EOF
 // Deterministic lockstep relay for a 2-player RTS.
@@ -22,15 +21,24 @@ cat << EOF
 //  5. Once both players have sent turn N, the server sends both command lists for
 //     turn N to both clients, always in player order. Both sims run the same inputs
 //     in the same order, so they stay in sync.
+//
+// The server runs one match at a time in a single loop. Each pass either takes
+// one connection while players join, or plays one turn once they're matched.
 package main
 
 import (
 	"bufio"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -220,17 +228,28 @@ func main() {
 	switch *mode {
 	case "server":
 		// run server
-		s := &Server{matches: map[string]*Match{}, joinTimeout: *joinTimeout, maxAhead: *maxAhead}
-		handleMatch := func(w http.ResponseWriter, r *http.Request) {
-			` ./main-handle-match.sh ${v}hdl_mtch_ `
+		s := &Server{joinTimeout: *joinTimeout, maxAhead: *maxAhead}
+		tcpAddr, err := net.ResolveTCPAddr("tcp", *addr)
+		if err != nil {
+			log.Fatal("listen: ", err)
 		}
-		handleWS := func(w http.ResponseWriter, r *http.Request) {
-			` ./main-handle-ws.sh ${v}hdl_ws_ `
+		ln, err := net.ListenTCP("tcp", tcpAddr)
+		if err != nil {
+			log.Fatal("listen: ", err)
 		}
-		http.HandleFunc("/match", handleMatch)
-		http.HandleFunc("/ws", handleWS)
 		log.Println("lockstep server listening on", *addr)
-		log.Fatal(http.ListenAndServe(*addr, nil))
+		// The server runs until it's stopped. Each pass takes one step: while
+		// players are joining, it handles one connection; once they're matched,
+		// it plays one turn. Joining sets matched when the match starts, and
+		// playing clears it when the match ends.
+		matched := false
+		for serving := true; serving; {
+			if !matched {
+				` ./main-join.sh ${v}jn_ `
+			} else {
+				` ./main-play.sh ${v}pl_ `
+			}
+		}
 	case "client":
 		if *ticksPerTurn < 1 || *delay < 1 {
 			log.Fatal("ticks-per-turn and delay must be >= 1")
