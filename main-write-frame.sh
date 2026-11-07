@@ -1,7 +1,7 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} Conn Msg Err When
+. ${NSMAP}/bind ${v} Conn Msg Err
 
 cat << EOF
 	// Write msg as one websocket text frame. Frames from the server aren't masked.
@@ -23,8 +23,6 @@ cat << EOF
 		frame = binary.BigEndian.AppendUint64(frame, uint64(n))
 	}
 	frame = append(frame, payload...)
-	if ${!when} {
-		${!conn}.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, ${!err} = ${!conn}.Write(frame)
-	}
+	${!conn}.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, ${!err} = ${!conn}.Write(frame)
 EOF

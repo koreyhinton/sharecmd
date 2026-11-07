@@ -12,7 +12,7 @@ export ${v}jn_IsMatch=isMatch
 export ${v}jn_IsWs=isWS
 export ${v}jn_Ready=ready
 export ${v}jn_Expired=expired
-export ${v}jn_When=${v}jn_Taken
+export ${v}jn_Taken=taken
 export ${v}jn_Msg=${v}jn_TakenMsg
 export ${v}jn_Err=${v}jn_TakenErr
 # join: send player p their start or end notice
@@ -20,7 +20,6 @@ export ${v}js_P=p
 export ${v}js_Ready=ready
 export ${v}js_Expired=expired
 export ${v}js_Connected=connected
-export ${v}js_When=connected
 export ${v}js_M=${v}jn_M
 # play: one turn
 export ${v}pl_S=s
@@ -30,7 +29,6 @@ export ${v}pl_Reading=reading
 export ${v}pl_Framing=framing
 export ${v}pl_Ended=ended
 export ${v}pl_Connected=connected
-export ${v}pl_When=connected
 
 cat << EOF
 // Deterministic lockstep relay for a 2-player RTS.
@@ -279,14 +277,18 @@ func main() {
 					if isWS {
 						` ./main-handle-ws.sh ${v}jn_ `
 					}
-					` ./main-write-frame.sh ${v}jn_ `
+					if taken {
+						` ./main-write-frame.sh ${v}jn_ `
+					}
 					` ./main-join-reply.sh ${v}jn_ `
 				}
 				` ./main-join-check.sh ${v}jn_ `
 				for p := 0; (ready || expired) && p < 2; p++ {
 					` ./main-join-notice.sh ${v}js_ `
 					` ./main-player-conn.sh ${v}js_ `
-					` ./main-write-frame.sh ${v}js_ `
+					if connected {
+						` ./main-write-frame.sh ${v}js_ `
+					}
 					` ./main-player-sent.sh ${v}js_ `
 					if expired && connected {
 						` ./main-player-close.sh ${v}js_ `
@@ -314,7 +316,9 @@ func main() {
 				` ./main-play-outcome.sh ${v}pl_ `
 				for p := 0; p < 2; p++ {
 					` ./main-player-conn.sh ${v}pl_ `
-					` ./main-write-frame.sh ${v}pl_ `
+					if connected {
+						` ./main-write-frame.sh ${v}pl_ `
+					}
 					` ./main-player-sent.sh ${v}pl_ `
 					if ended && connected {
 						` ./main-player-close.sh ${v}pl_ `
