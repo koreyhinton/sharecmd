@@ -1,18 +1,15 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} S Req Conn Reader Code Body Keep Switched When
+. ${NSMAP}/bind ${v} S Req Conn Reader Code Body Keep Switched Taken
 
 cat << EOF
 	// GET /ws?match=ID&player=N opens player N's websocket in the current match.
-	query, reqHeader := url.Values{}, http.Header{}
-	if ${!when} {
-		query, reqHeader = ${!req}.URL.Query(), ${!req}.Header
-	}
+	query, reqHeader := ${!req}.URL.Query(), ${!req}.Header
 	var player int
 	_, playerErr := fmt.Sscan(query.Get("player"), &player)
-	validPlayer := ${!when} && playerErr == nil && player >= 0 && player <= 1
-	if ${!when} && !validPlayer {
+	validPlayer := playerErr == nil && player >= 0 && player <= 1
+	if !validPlayer {
 		${!code}, ${!body} = http.StatusBadRequest, "bad player\n"
 	}
 	found := validPlayer && ${!s}.match != nil && ${!s}.match.id == query.Get("match")
@@ -34,8 +31,7 @@ cat << EOF
 		${!switched} = true
 	}
 
-	// Take the player's slot. If it's already in use, the connection gets an
-	// "end" message instead.
+	// Take the player's slot, or mark the connection taken if it's in use.
 	claimed := isUpgrade && ${!s}.match.conns[player] == nil
 	if claimed {
 		${!s}.match.conns[player] = ${!conn}
@@ -43,7 +39,5 @@ cat << EOF
 		${!keep} = true
 		log.Printf("[%s] player %d connected", ${!s}.match.id, player)
 	}
-	taken := isUpgrade && !claimed
-	takenMsg := Msg{Type: "end", Reason: "slot taken or match over"}
-	var takenErr error
+	${!taken} = isUpgrade && !claimed
 EOF

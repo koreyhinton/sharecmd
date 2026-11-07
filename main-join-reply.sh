@@ -1,7 +1,7 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} Conn Req Code Body Header Switched Keep TakenErr When
+. ${NSMAP}/bind ${v} Conn Req Code Body Header Switched Keep TakenErr
 
 cat << EOF
 	// Log a failed "end" message to a taken slot. Send the HTTP reply, unless
@@ -23,7 +23,7 @@ cat << EOF
 		}
 		res.Write(${!conn})
 	}
-	closes := ${!when} && !${!keep}
+	closes := !${!keep}
 	if closes {
 		${!conn}.Close()
 	}

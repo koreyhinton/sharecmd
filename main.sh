@@ -1,43 +1,25 @@
 #!/bin/bash
 v=${1:-mn_}
 # maps
-export ${v}ja_S=s
-export ${v}ja_Listener=ln
-export ${v}jr_Conn=conn
-export ${v}jr_When=accepted
-export ${v}mt_S=s
-export ${v}mt_Req=req
-export ${v}mt_Code=code
-export ${v}mt_Body=body
-export ${v}mt_Header=header
-export ${v}mt_When=isMatch
-export ${v}ws_S=s
-export ${v}ws_Req=req
-export ${v}ws_Conn=conn
-export ${v}ws_Reader=reader
-export ${v}ws_Code=code
-export ${v}ws_Body=body
-export ${v}ws_Keep=keep
-export ${v}ws_Switched=switched
-export ${v}ws_When=isWS
-export ${v}tk_Conn=conn
-export ${v}tk_Msg=takenMsg
-export ${v}tk_Err=takenErr
-export ${v}tk_When=taken
-export ${v}jp_Conn=conn
-export ${v}jp_Req=req
-export ${v}jp_Code=code
-export ${v}jp_Body=body
-export ${v}jp_Header=header
-export ${v}jp_Switched=switched
-export ${v}jp_Keep=keep
-export ${v}jp_TakenErr=takenErr
-export ${v}jp_When=accepted
-export ${v}jc_S=s
-export ${v}jn_M=waiting
-export ${v}jn_P=p
-export ${v}jn_Ready=ready
-export ${v}jn_Expired=expired
+export ${v}jn_S=s
+export ${v}jn_Listener=ln
+export ${v}jn_Conn=conn
+export ${v}jn_Reader=reader
+export ${v}jn_Req=req
+export ${v}jn_Code=code
+export ${v}jn_Body=body
+export ${v}jn_Header=header
+export ${v}jn_Keep=keep
+export ${v}jn_Switched=switched
+export ${v}jn_Taken=taken
+export ${v}jn_When=taken
+export ${v}jn_Msg=takenMsg
+export ${v}jn_Err=takenErr
+export ${v}jn_TakenErr=takenErr
+export ${v}nt_M=waiting
+export ${v}nt_P=p
+export ${v}nt_Ready=ready
+export ${v}nt_Expired=expired
 export ${v}wf_Conn=c
 export ${v}wf_Msg=out
 export ${v}wf_Err=writeErr
@@ -293,15 +275,21 @@ func main() {
 		matched := false
 		for serving := true; serving; {
 			if !matched {
-				` ./main-join-accept.sh ${v}ja_ `
-				` ./main-join-read-request.sh ${v}jr_ `
-				` ./main-handle-match.sh ${v}mt_ `
-				` ./main-handle-ws.sh ${v}ws_ `
-				` ./main-write-frame.sh ${v}tk_ `
-				` ./main-join-reply.sh ${v}jp_ `
-				` ./main-join-check.sh ${v}jc_ `
+				` ./main-join-accept.sh ${v}jn_ `
+				if accepted {
+					` ./main-join-read-request.sh ${v}jn_ `
+					if isMatch {
+						` ./main-handle-match.sh ${v}jn_ `
+					}
+					if isWS {
+						` ./main-handle-ws.sh ${v}jn_ `
+					}
+					` ./main-write-frame.sh ${v}jn_ `
+					` ./main-join-reply.sh ${v}jn_ `
+				}
+				` ./main-join-check.sh ${v}jn_ `
 				for p := 0; (ready || expired) && p < 2; p++ {
-					` ./main-join-notice.sh ${v}jn_ `
+					` ./main-join-notice.sh ${v}nt_ `
 					` ./main-write-frame.sh ${v}wf_ `
 					` ./main-join-notified.sh ${v}jd_ `
 				}

@@ -1,14 +1,14 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} S Req Code Body Header When
+. ${NSMAP}/bind ${v} S Req Code Body Header
 
 cat << EOF
 	// POST /match gives the caller a slot: player 0 starts a new match and
 	// player 1 fills it. Matches run one at a time, so once both slots are
 	// given out, later callers are turned away until the match is over.
-	isPost := ${!when} && ${!req}.Method == http.MethodPost
-	if ${!when} && !isPost {
+	isPost := ${!req}.Method == http.MethodPost
+	if !isPost {
 		${!code}, ${!body} = http.StatusMethodNotAllowed, "POST only\n"
 	}
 	isNew := isPost && ${!s}.match == nil
