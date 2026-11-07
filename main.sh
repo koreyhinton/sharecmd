@@ -1,46 +1,35 @@
 #!/bin/bash
 v=${1:-mn_}
 # maps
+# Only names main.sh uses are exported. Other bound names default to their
+# namespaced name (such as mn_jn_Body), shared by every step in the namespace.
 # join: handle one connection, then start or expire the match
 export ${v}jn_S=s
 export ${v}jn_Listener=ln
 export ${v}jn_Matched=matched
-export ${v}jn_Conn=conn
-export ${v}jn_Reader=reader
-export ${v}jn_Req=req
-export ${v}jn_Code=code
-export ${v}jn_Body=body
-export ${v}jn_Header=header
-export ${v}jn_Keep=keep
-export ${v}jn_Switched=switched
-export ${v}jn_Taken=taken
-export ${v}jn_When=taken
-export ${v}jn_Msg=takenMsg
-export ${v}jn_Err=takenErr
-export ${v}jn_TakenErr=takenErr
-export ${v}jn_M=waiting
+export ${v}jn_Accepted=accepted
+export ${v}jn_IsMatch=isMatch
+export ${v}jn_IsWs=isWS
+export ${v}jn_Ready=ready
+export ${v}jn_Expired=expired
+export ${v}jn_When=${v}jn_Taken
+export ${v}jn_Msg=${v}jn_TakenMsg
+export ${v}jn_Err=${v}jn_TakenErr
 # join: send player p their start or end notice
-export ${v}js_M=waiting
 export ${v}js_P=p
 export ${v}js_Ready=ready
 export ${v}js_Expired=expired
-export ${v}js_Conn=c
-export ${v}js_Msg=out
-export ${v}js_Err=writeErr
+export ${v}js_Connected=connected
 export ${v}js_When=connected
+export ${v}js_M=${v}jn_M
 # play: one turn
 export ${v}pl_S=s
 export ${v}pl_Matched=matched
-export ${v}pl_M=m
 export ${v}pl_P=p
 export ${v}pl_Reading=reading
-export ${v}pl_Reader=reader
-export ${v}pl_Data=data
-export ${v}pl_ReadErr=readErr
 export ${v}pl_Framing=framing
-export ${v}pl_Conn=c
-export ${v}pl_Msg=out
-export ${v}pl_Err=writeErr
+export ${v}pl_Ended=ended
+export ${v}pl_Connected=connected
 export ${v}pl_When=connected
 
 cat << EOF

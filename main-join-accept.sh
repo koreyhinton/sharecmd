@@ -1,7 +1,7 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} S Listener
+. ${NSMAP}/bind ${v} S Listener Conn Accepted
 
 cat << EOF
 	// Join: take one connection and handle its request. Each connection
@@ -14,10 +14,10 @@ cat << EOF
 		deadline = ${!s}.match.deadline
 	}
 	${!listener}.SetDeadline(deadline)
-	conn, acceptErr := ${!listener}.Accept()
+	${!conn}, acceptErr := ${!listener}.Accept()
 	timedOut := errors.Is(acceptErr, os.ErrDeadlineExceeded)
 	if acceptErr != nil && !timedOut {
 		log.Println("accept:", acceptErr)
 	}
-	accepted := acceptErr == nil
+	${!accepted} := acceptErr == nil
 EOF
