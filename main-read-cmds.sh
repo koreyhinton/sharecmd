@@ -1,28 +1,18 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} S M P Reading
-export ${v}msg_Reader=reader
-export ${v}msg_Data=data
-export ${v}msg_Err=readErr
-export ${v}msg_When=needs
+. ${NSMAP}/bind ${v} S M P Data ReadErr
 
 cat << EOF
-	// Read player p's next message, unless they've already sent this turn.
-	turnGot := ${!m}.got[${!m}.nextTurn]
-	needs := ${!m}.reason == "" && !(turnGot != nil && turnGot[${!p}])
-	reader := ${!m}.readers[${!p}]
-	var data []byte
-	var readErr error
-	` ./main-read-message.sh ${v}msg_ `
-	disconnected := needs && readErr != nil
+	// A failed read means player p disconnected.
+	disconnected := ${!read_err} != nil
 	if disconnected {
 		${!m}.reason = fmt.Sprintf("player %d disconnected", ${!p})
 	}
 
 	// Only "cmds" messages count. Anything else is ignored.
 	var msg Msg
-	isCmds := needs && !disconnected && json.Unmarshal(data, &msg) == nil && msg.Type == "cmds"
+	isCmds := !disconnected && json.Unmarshal(${!data}, &msg) == nil && msg.Type == "cmds"
 	oldTurn := isCmds && msg.Turn < ${!m}.nextTurn
 	// A normal client is never more than its input delay ahead. Anything far
 	// past that is a bug or abuse, and storing it would let memory grow without limit.
@@ -42,5 +32,4 @@ cat << EOF
 		${!m}.got[msg.Turn][${!p}] = true
 		${!m}.pending[msg.Turn][${!p}] = msg.Cmds
 	}
-	${!reading} = needs
 EOF

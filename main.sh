@@ -1,8 +1,10 @@
 #!/bin/bash
 v=${1:-mn_}
 # maps
+# join: handle one connection, then start or expire the match
 export ${v}jn_S=s
 export ${v}jn_Listener=ln
+export ${v}jn_Matched=matched
 export ${v}jn_Conn=conn
 export ${v}jn_Reader=reader
 export ${v}jn_Req=req
@@ -16,26 +18,30 @@ export ${v}jn_When=taken
 export ${v}jn_Msg=takenMsg
 export ${v}jn_Err=takenErr
 export ${v}jn_TakenErr=takenErr
-export ${v}nt_M=waiting
-export ${v}nt_P=p
-export ${v}nt_Ready=ready
-export ${v}nt_Expired=expired
-export ${v}wf_Conn=c
-export ${v}wf_Msg=out
-export ${v}wf_Err=writeErr
-export ${v}wf_When=connected
-export ${v}jd_M=waiting
-export ${v}jd_P=p
-export ${v}jd_Conn=c
-export ${v}jd_Err=writeErr
-export ${v}jd_Expired=expired
-export ${v}jf_S=s
-export ${v}jf_M=waiting
-export ${v}jf_Ready=ready
-export ${v}jf_Expired=expired
-export ${v}jf_Matched=matched
+export ${v}jn_M=waiting
+# join: send player p their start or end notice
+export ${v}js_M=waiting
+export ${v}js_P=p
+export ${v}js_Ready=ready
+export ${v}js_Expired=expired
+export ${v}js_Conn=c
+export ${v}js_Msg=out
+export ${v}js_Err=writeErr
+export ${v}js_When=connected
+# play: one turn
 export ${v}pl_S=s
 export ${v}pl_Matched=matched
+export ${v}pl_M=m
+export ${v}pl_P=p
+export ${v}pl_Reading=reading
+export ${v}pl_Reader=reader
+export ${v}pl_Data=data
+export ${v}pl_ReadErr=readErr
+export ${v}pl_Framing=framing
+export ${v}pl_Conn=c
+export ${v}pl_Msg=out
+export ${v}pl_Err=writeErr
+export ${v}pl_When=connected
 
 cat << EOF
 // Deterministic lockstep relay for a 2-player RTS.
@@ -289,13 +295,45 @@ func main() {
 				}
 				` ./main-join-check.sh ${v}jn_ `
 				for p := 0; (ready || expired) && p < 2; p++ {
-					` ./main-join-notice.sh ${v}nt_ `
-					` ./main-write-frame.sh ${v}wf_ `
-					` ./main-join-notified.sh ${v}jd_ `
+					` ./main-join-notice.sh ${v}js_ `
+					` ./main-player-conn.sh ${v}js_ `
+					` ./main-write-frame.sh ${v}js_ `
+					` ./main-player-sent.sh ${v}js_ `
+					if expired && connected {
+						` ./main-player-close.sh ${v}js_ `
+					}
 				}
-				` ./main-join-finish.sh ${v}jf_ `
+				if expired {
+					` ./main-match-end.sh ${v}jn_ `
+				}
+				if ready {
+					` ./main-join-start.sh ${v}jn_ `
+				}
 			} else {
-				` ./main-play.sh ${v}pl_ `
+				` ./main-play-begin.sh ${v}pl_ `
+				for p := 0; p < 2; p++ {
+					for reading := true; reading; {
+						` ./main-play-need.sh ${v}pl_ `
+						if reading {
+							for framing := true; framing; {
+								` ./main-read-frame.sh ${v}pl_ `
+							}
+							` ./main-read-cmds.sh ${v}pl_ `
+						}
+					}
+				}
+				` ./main-play-outcome.sh ${v}pl_ `
+				for p := 0; p < 2; p++ {
+					` ./main-player-conn.sh ${v}pl_ `
+					` ./main-write-frame.sh ${v}pl_ `
+					` ./main-player-sent.sh ${v}pl_ `
+					if ended && connected {
+						` ./main-player-close.sh ${v}pl_ `
+					}
+				}
+				if ended {
+					` ./main-match-end.sh ${v}pl_ `
+				}
 			}
 		}
 	case "client":

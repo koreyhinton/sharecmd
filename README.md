@@ -12,7 +12,7 @@
 > 2. Make the Emacs frame full screen (`M-x toggle-frame-fullscreen`), then split it into two side-by-side portrait windows with `C-x 3`.
 > 3. Open `main.sh` (`C-x C-f main.sh`) and turn on wik-mode (`M-x wik-mode`).
 > 4. Search for `main(` (`C-s main(`) to jump to the start of the program.
-> 5. Read down from there. On a subscript line, such as `` ` ./main-join.sh ${v}jn_ ` ``, press `C-c <down>` to open the subscript and `C-c <up>` to close it.
+> 5. Read down from there. On a subscript line, such as `` ` ./main-join-accept.sh ${v}jn_ ` ``, press `C-c <down>` to open the subscript and `C-c <up>` to close it.
 
 A deterministic lockstep relay for a 2-player RTS game, plus a demo client.
 
