@@ -1,7 +1,7 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} S Req Conn Reader Code Body Keep Switched Taken When
+. ${NSMAP}/bind ${v} S Req Conn Reader Code Body Keep Switched When
 
 cat << EOF
 	// GET /ws?match=ID&player=N opens player N's websocket in the current match.
@@ -34,7 +34,8 @@ cat << EOF
 		${!switched} = true
 	}
 
-	// Take the player's slot, or mark the connection taken if it's already in use.
+	// Take the player's slot. If it's already in use, the connection gets an
+	// "end" message instead.
 	claimed := isUpgrade && ${!s}.match.conns[player] == nil
 	if claimed {
 		${!s}.match.conns[player] = ${!conn}
@@ -42,5 +43,7 @@ cat << EOF
 		${!keep} = true
 		log.Printf("[%s] player %d connected", ${!s}.match.id, player)
 	}
-	${!taken} = isUpgrade && !claimed
+	taken := isUpgrade && !claimed
+	takenMsg := Msg{Type: "end", Reason: "slot taken or match over"}
+	var takenErr error
 EOF

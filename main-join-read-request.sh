@@ -16,4 +16,10 @@ cat << EOF
 	hasReq := req != nil
 	isMatch := hasReq && req.URL.Path == "/match"
 	isWS := hasReq && req.URL.Path == "/ws"
+
+	// The reply, which the steps below fill in. keep is set when the connection
+	// becomes a player's websocket, and switched once the handshake reply is sent.
+	code, body := http.StatusNotFound, "404 page not found\n"
+	header := http.Header{"Content-Type": {"text/plain; charset=utf-8"}}
+	keep, switched := false, false
 EOF
