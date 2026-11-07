@@ -12,9 +12,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: sharecmd
+      # Check out the orc ws release this repo expects, named by ORC_WS_VERSION
+      # in build.sh, so a newer orc main can't change the build.
+      - name: Read orc ws version
+        id: orc
+        working-directory: sharecmd
+        run: |
+          version=$(sed -n 's/^export ORC_WS_VERSION=//p' build.sh)
+          if [ -z "$version" ]; then
+            echo "ORC_WS_VERSION not found in build.sh"
+            exit 1
+          fi
+          echo "ref=ws/v$version" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: koreyhinton/orc
+          ref: ${{ steps.orc.outputs.ref }}
           path: orc
 
       - uses: actions/setup-go@v5

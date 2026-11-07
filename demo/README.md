@@ -10,7 +10,7 @@ From the parent folder, generate `main.go` and start the server:
 
 ```sh
 ./build.sh
-go run main.go models.go -mode server -addr :8080
+go run . -mode server -addr :8080
 ```
 
 `build.sh` needs the `orc` repo checked out next to this one. See [Build it](../README.md#build-it) in the main README.

@@ -1,5 +1,6 @@
 # orc-generated files
 main.go
+ws_models.go
 
 # Emacs autosave files
 \#*\#

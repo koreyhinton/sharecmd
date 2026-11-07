@@ -26,7 +26,7 @@ For a playable demo game (Rust + macroquad, desktop and browser), see [demo/READ
 ./build.sh
 ```
 
-This expects the `orc` repo to be checked out next to this one (it reads `../orc/lib/src/main/bash/com/koreyhinton/nsmap`). Run it again whenever you change `main.sh` or any of its `main-*.sh` subscripts.
+This expects the `orc` repo to be checked out next to this one. It reads `bind` from `../orc/lib/src/main/bash/com/koreyhinton/nsmap` and the websocket snippets from `../orc/lib/src/templates/go/com/koreyhinton/ws`. It also generates `ws_models.go` (the `WsConn` type) from orc's `ws/models.sh`. Run it again whenever you change `main.sh`, any of its `main-*.sh` subscripts, or the orc snippets.
 
 ## Test it
 
@@ -45,19 +45,19 @@ Open three terminals in this folder.
 **Terminal 1: server**
 
 ```sh
-go run main.go models.go -mode server -addr :8080
+go run . -mode server -addr :8080
 ```
 
 **Terminal 2: player 0**
 
 ```sh
-go run main.go models.go -mode client -server http://localhost:8080
+go run . -mode client -server http://localhost:8080
 ```
 
 **Terminal 3: player 1**
 
 ```sh
-go run main.go models.go -mode client -server http://localhost:8080
+go run . -mode client -server http://localhost:8080
 ```
 
 The first client to connect becomes player 0 and the second becomes player 1. When both are connected, the match starts. Type a command in either client and press Enter. Both clients will print it on the same turn.
@@ -95,7 +95,7 @@ The server runs one match at a time. While a match is being played it doesn't ta
 Example with a shorter join timeout:
 
 ```sh
-go run main.go models.go -mode server -addr :8080 -join-timeout 10s
+go run . -mode server -addr :8080 -join-timeout 10s
 ```
 
 ## Client options
@@ -110,5 +110,5 @@ go run main.go models.go -mode server -addr :8080 -join-timeout 10s
 Example with a longer delay for a slow connection:
 
 ```sh
-go run main.go models.go -mode client -server http://localhost:8080 -delay 4
+go run . -mode client -server http://localhost:8080 -delay 4
 ```

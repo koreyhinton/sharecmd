@@ -1,6 +1,9 @@
 #!/bin/bash
 v=${1:-mn_}
 # maps
+# Websocket steps come from orc's ws snippets (${ORC_WS}/snippets).
+export WS_MAX_MESSAGE=maxMessage
+
 # Only names main.sh uses are exported. Other bound names default to their
 # namespaced name (such as mn_jn_Body), shared by every step in the namespace.
 # join: handle one connection, then start or expire the match
@@ -10,11 +13,12 @@ export ${v}jn_Matched=matched
 export ${v}jn_Accepted=accepted
 export ${v}jn_IsMatch=isMatch
 export ${v}jn_IsWs=isWS
+export ${v}jn_Found=found
 export ${v}jn_Ready=ready
 export ${v}jn_Expired=expired
 export ${v}jn_Taken=taken
 export ${v}jn_Msg=${v}jn_TakenMsg
-export ${v}jn_Err=${v}jn_TakenErr
+export ${v}jn_WriteErr=${v}jn_TakenErr
 # join: send player p their start or end notice
 export ${v}js_P=p
 export ${v}js_Ready=ready
@@ -50,23 +54,17 @@ cat << EOF
 package main
 
 import (
-	"bufio"
-	"crypto/sha1"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
+EOF
+
+	${ORC_WS}/snippets/import.sh "${ORC_WS_VERSION}" || exit 1
+
+cat << EOF
 	"flag"
-	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/gorilla/websocket"
@@ -270,15 +268,20 @@ func main() {
 			if !matched {
 				` ./main-join-accept.sh ${v}jn_ `
 				if accepted {
-					` ./main-join-read-request.sh ${v}jn_ `
+					` ${ORC_WS}/snippets/read-request.sh ${v}jn_ `
+					` ./main-join-route.sh ${v}jn_ `
 					if isMatch {
 						` ./main-handle-match.sh ${v}jn_ `
 					}
 					if isWS {
 						` ./main-handle-ws.sh ${v}jn_ `
-					}
-					if taken {
-						` ./main-write-frame.sh ${v}jn_ `
+						if found {
+							` ${ORC_WS}/snippets/upgrade.sh ${v}jn_ `
+							` ./main-join-claim.sh ${v}jn_ `
+							if taken {
+								` ${ORC_WS}/snippets/write-json.sh ${v}jn_ `
+							}
+						}
 					}
 					` ./main-join-reply.sh ${v}jn_ `
 				}
@@ -287,7 +290,7 @@ func main() {
 					` ./main-join-notice.sh ${v}js_ `
 					` ./main-player-conn.sh ${v}js_ `
 					if connected {
-						` ./main-write-frame.sh ${v}js_ `
+						` ${ORC_WS}/snippets/write-json.sh ${v}js_ `
 					}
 					` ./main-player-sent.sh ${v}js_ `
 					if expired && connected {
@@ -307,7 +310,7 @@ func main() {
 						` ./main-play-need.sh ${v}pl_ `
 						if reading {
 							for framing := true; framing; {
-								` ./main-read-frame.sh ${v}pl_ `
+								` ${ORC_WS}/snippets/read-frame.sh ${v}pl_ `
 							}
 							` ./main-read-cmds.sh ${v}pl_ `
 						}
@@ -317,7 +320,7 @@ func main() {
 				for p := 0; p < 2; p++ {
 					` ./main-player-conn.sh ${v}pl_ `
 					if connected {
-						` ./main-write-frame.sh ${v}pl_ `
+						` ${ORC_WS}/snippets/write-json.sh ${v}pl_ `
 					}
 					` ./main-player-sent.sh ${v}pl_ `
 					if ended && connected {

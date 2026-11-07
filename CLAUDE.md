@@ -5,7 +5,8 @@
 `main.go` is generated. Never edit it by hand: change `main.sh` and its subscripts, then run `./build.sh`.
 
 - `build.sh` runs `./main.sh | gofmt > ./main.go` with `pipefail` set.
-- It needs the `orc` repo checked out next to this one (`../orc/lib/src/main/bash/com/koreyhinton/nsmap`). `bind` comes from there.
+- It needs the `orc` repo checked out next to this one. `bind` comes from `../orc/lib/src/main/bash/com/koreyhinton/nsmap` (`NSMAP`), and the websocket snippets from `../orc/lib/src/templates/go/com/koreyhinton/ws` (`ORC_WS`). `build.sh` stops if the snippets aren't there.
+- `build.sh` exports `ORC_WS_VERSION`, the orc ws version this repo expects, and generates `ws_models.go` (the `WsConn` type) with `${ORC_WS}/models.sh`. `main.sh` passes the same version to `${ORC_WS}/snippets/import.sh`. Both fail the build if orc has a different version. `ws_models.go` is generated and ignored by git, like `main.go`.
 - After any change, run `./build.sh && go vet ./... && go test -race ./...`.
 - `server_test.go` tests the server end to end by building and running the binary, since the server is inlined in `main()`. `integration_test.go` runs the server with two real clients. When you change server or client behavior, update or add a test. CI runs the same checks on pull requests into `main` (`.github/workflows/test.yml`).
 
@@ -15,12 +16,13 @@ Server code is written as imperative orc subscripts, inlined into `main`, not as
 
 - Put each server step in its own subscript (`main-<name>.sh`). Don't add server functions or methods.
 - `main.sh` calls every step directly, in order, and steps are leaves: a subscript never inlines another subscript. The server loop in `main.sh` is the whole outline of the server: a list of steps, with the loops and `if`s that decide which steps run.
-- Join steps are named `main-join-*.sh` and play steps `main-play-*.sh`. A step used in several places (`main-write-frame.sh`, `main-player-conn.sh`, `main-player-sent.sh`, `main-player-close.sh`, `main-match-end.sh`) is one subscript called at each place.
-- A step that runs only in some cases gets an `if` around its call in `main.sh` (`if isWS { ... }`, `if ended && connected { ... }`). It doesn't bind a bool to cancel itself. That includes shared steps: `main-write-frame.sh` is called as `if connected { ... }` or `if taken { ... }`.
-- A step can declare variables that later steps use. Go scoping still applies: a variable declared inside an `if` or loop in `main.sh` is gone after it. So declare a value that's needed after the block in an earlier step, outside it. `main-join-read-request.sh` declares `taken`, and `main-handle-ws.sh` sets it inside `if isWS`.
+- Websocket protocol code lives in orc's ws snippets, which `main.sh` calls like any other step: `` ` ${ORC_WS}/snippets/read-frame.sh ${v}pl_ ` ``. They are leaves too. Keep websocket protocol code (handshake, framing, masking) in orc, and app logic (routing, players, matches) in this repo. See orc's `lib/src/templates/go/com/koreyhinton/ws/README.md`.
+- Join steps are named `main-join-*.sh` and play steps `main-play-*.sh`. A step used in several places (`${ORC_WS}/snippets/write-json.sh`, `main-player-conn.sh`, `main-player-sent.sh`, `main-player-close.sh`, `main-match-end.sh`) is one subscript called at each place.
+- A step that runs only in some cases gets an `if` around its call in `main.sh` (`if isWS { ... }`, `if ended && connected { ... }`). It doesn't bind a bool to cancel itself. That includes shared steps: `write-json.sh` is called as `if connected { ... }` or `if taken { ... }`.
+- A step can declare variables that later steps use. Go scoping still applies: a variable declared inside an `if` or loop in `main.sh` is gone after it. So declare a value that's needed after the block in an earlier step, outside it. `main-join-route.sh` declares `taken`, and `main-join-claim.sh` sets it inside `if isWS`.
 - A loop is driven by a flag, not `break`: `for reading := true; reading; { ... }`, where a step sets `reading = false`. The loop sits in `main.sh`, and its body is a list of steps.
 - No `defer`: inlined code runs inside `main`, so a `defer` would wait until the server exits.
-- No callbacks, goroutines or locks on the server. Code that would wait on a timer checks a deadline in the loop instead (`main-join-accept.sh` sets the listener's deadline to the match's join deadline). The server speaks HTTP and websockets itself, with `net`, `net/http` request parsing and hand-written frames, so it doesn't use gorilla.
+- No callbacks, goroutines or locks on the server. Code that would wait on a timer checks a deadline in the loop instead (`main-join-accept.sh` sets the listener's deadline to the match's join deadline). The server speaks HTTP and websockets itself, with `net`, `net/http` request parsing and orc's ws snippets, so it doesn't use gorilla.
 - This applies to server code only. Leave client code (`runClient`, `Sim`) and `demo/` in their current form.
 
 ### Control flow
@@ -30,7 +32,7 @@ Server code is written as imperative orc subscripts, inlined into `main`, not as
 
   ```go
   if accepted {
-  	` ./main-join-read-request.sh ${v}jn_ `
+  	` ${ORC_WS}/snippets/read-request.sh ${v}jn_ `
   	if isMatch {
   		` ./main-handle-match.sh ${v}jn_ `
   	}
@@ -70,10 +72,10 @@ EOF
   	` ./main-handle-match.sh ${v}jn_ `
   ```
 
-- Steps that run together share one namespace: `jn_` for join, `js_` for join's per-player start and end notices, and `pl_` for play. `main.sh` exports only the names it uses itself (`accepted`, `ready`, `p`, ...). Every other bound name keeps its namespaced name in `main.go` (`mn_jn_Body`), so it needs no export. Export an alias when two bound names must be the same variable: `export ${v}jn_Msg=${v}jn_TakenMsg` makes `main-write-frame.sh`'s `Msg` the taken message, and `export ${v}js_M=${v}jn_M` gives the notice loop join's match. In a namespace, a bound name means one variable in every step that uses it. When two steps need the same name for different variables, give one of them a more specific name (`main-read-frame.sh` binds `ReadErr`, so it doesn't clash with `main-write-frame.sh`'s `Err`), or use a separate namespace (`js_`, where `Conn` is player p's connection, not the connection being joined).
+- Steps that run together share one namespace: `jn_` for join, `js_` for join's per-player start and end notices, and `pl_` for play. `main.sh` exports only the names it uses itself (`accepted`, `ready`, `p`, ...). Every other bound name keeps its namespaced name in `main.go` (`mn_jn_Body`), so it needs no export. Export an alias when two bound names must be the same variable: `export ${v}jn_Msg=${v}jn_TakenMsg` makes `write-json.sh`'s `Msg` the taken message, and `export ${v}js_M=${v}jn_M` gives the notice loop join's match. In a namespace, a bound name means one variable in every step that uses it. When two steps need the same name for different variables, give one of them a more specific name (`read-frame.sh` binds `ReadErr` and `write-json.sh` binds `WriteErr`, so they don't clash in `pl_`), or use a separate namespace (`js_`, where `Ws` is player p's websocket, separate from join's).
 - Inside the subscript, refer to bound variables as `${!s}`, `${!req}`, `${!taken}`. `bind` lowercases names and turns CamelCase into snake_case (`ContentType` → `${!content_type}`).
 - Bind every local from the calling scope that the subscript uses. Package-level names don't need binding: imports, types, and constants such as `maxMessage`.
 - Also bind every variable a step declares for a later step or for `main.sh` to use, and declare it through its bound name: `${!code}, ${!body} := ...`, not `code, body := ...`. Then the step works whatever name `main.sh` maps it to, or with no export at all (`bind` then names it after the namespace, such as `mn_jn_Body`). Variables used only inside the step can keep plain names.
 - Prefer binding one struct (such as `S` for `*Server`) over binding many separate variables.
-- Package-level server values that `main.sh` doesn't use directly go in `models.go`.
+- Package-level server values that `main.sh` doesn't use directly go in `models.go`. Websocket types come from orc (`WsConn` in `ws_models.go`), so don't redefine them here.
 - The heredoc is unquoted, so escape `$` and backticks in Go code (or keep them out of it). Leave `%s` format verbs alone when replacing a bound `s`.

@@ -1,9 +1,9 @@
 #!/bin/bash
 v=${1}
 # maps
-. ${NSMAP}/bind ${v} Conn
+. ${NSMAP}/bind ${v} Ws
 
 cat << EOF
 	// Close player p's connection.
-	${!conn}.Close()
+	${!ws}.Conn.Close()
 EOF

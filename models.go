@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"math/rand"
-	"net"
 	"time"
 )
 
@@ -37,8 +35,7 @@ type Match struct {
 	joined   int       // players given a slot by POST /match
 	deadline time.Time // both players must open their websocket by then
 
-	conns    [2]net.Conn
-	readers  [2]*bufio.Reader // each player's websocket, read through the buffer used for the handshake
+	players  [2]*WsConn // each player's websocket, nil until they connect (WsConn is generated into ws_models.go)
 	nextTurn int
 	pending  map[int]*[2][]json.RawMessage
 	got      map[int]*[2]bool
