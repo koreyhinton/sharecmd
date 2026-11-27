@@ -2,6 +2,9 @@
 main.go
 ws_models.go
 
+# the binary go build makes (named after the module), such as for DEPLOY.md
+/sharecmd
+
 # Emacs autosave files
 \#*\#
 .\#*

@@ -62,6 +62,11 @@ go run . -mode client -server http://localhost:8080
 
 The first client to connect becomes player 0 and the second becomes player 1. When both are connected, the match starts. Type a command in either client and press Enter. Both clients will print it on the same turn.
 
+## Deploy it
+
+To run the server on a VPS, with a systemd service and notes on serving
+browser clients over HTTP or HTTPS, see [DEPLOY.md](DEPLOY.md).
+
 ## Sending a command
 
 At a client prompt, type the command as plain text and press Enter:
